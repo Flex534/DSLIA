@@ -15,7 +15,10 @@ async def prueba(ctx,*args):
     respuesta= ' '.join(args)
     await ctx.send(respuesta)
 
-
+@bot.command()
+async def saludo(ctx):
+    apodo= ctx.author.nick if ctx.author.nick else ctx.author.name
+    await ctx.send(f"Hola {apodo}, soy {bot.user.name} estoy aqui para ayudarte")
 
 
 @bot.event
