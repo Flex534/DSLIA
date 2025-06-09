@@ -22,6 +22,23 @@ async def on_member_join(member):
         print(f"Rol '{role_name}' no encontrado en el servidor.")
 
 bot= commands.Bot(command_prefix ="!", intents=intents)
+@bot.command(name="ayuda")
+async def ayuda(ctx):
+    mensaje = """
+📚 **Comandos disponibles**:
+
+🔹 `!ayuda` - Muestra este mensaje.
+🔹 `!promover @usuario` - Asigna el rol 'Docente' a un usuario (solo para docentes).
+🔹 Otros comandos personalizados que tengas aquí...
+
+Si tenés dudas, consultá con un Docente o administrador del servidor.
+    """
+    try:
+        await ctx.author.send(mensaje)
+        await ctx.send("📬 Te envié los comandos por privado.")
+    except discord.Forbidden:
+        await ctx.send("❌ No pude enviarte un mensaje privado. Asegurate de tener los DMs activados.")
+
 
 @bot.command()
 @commands.has_role("Docente")
