@@ -28,6 +28,23 @@ bot= commands.Bot(command_prefix ="!", intents=intents)
 async def canal_privado(ctx):
     await ctx.send("Este comando solo lo pueden usar docentes.")
 
+@bot.command()
+@commands.has_role("Docente")  # Solo docentes pueden usar este comando
+async def promover(ctx, miembro: discord.Member):
+    rol_docente = discord.utils.get(ctx.guild.roles, name="Docente")
+
+    if not rol_docente:
+        await ctx.send("⚠️ El rol 'Docente' no existe en este servidor.")
+        return
+
+    try:
+        await miembro.add_roles(rol_docente)
+        await ctx.send(f"✅ {miembro.mention} ahora es Docente.")
+    except discord.Forbidden:
+        await ctx.send("❌ No tengo permisos para asignar el rol 'Docente'.")
+    except Exception as e:
+        await ctx.send(f"⚠️ Ocurrió un error: {e}") 
+
 @bot.event
 async def on_command_error(ctx, error):
     if isinstance(error, commands.MissingRole):
