@@ -7,6 +7,7 @@ import os
 import datetime
 import aiofiles
 import sqlite3
+from discord.ui import View, Button
 
 intents= discord.Intents.default()
 intents.message_content= True
@@ -318,6 +319,7 @@ async def help_command(ctx):
     embed.add_field(name="!saludo", value="El bot te saluda.", inline=False)
     embed.add_field(name="!subir", value="(Docente) Sube un archivo de teoría, TP o bibliografía.", inline=False)
     embed.add_field(name="!ver_archivos [filtro]", value="Muestra los archivos subidos. Puedes filtrar por 'teoria', 'tp', 'bibliografia'.", inline=False)
+    embed.add_field(name="!descargar <categoria>", value="Muestra los archivos de la categoría elegida y permite descargarlos con botones interactivos.", inline=False)
     embed.add_field(name="!eliminar_archivo <nombre>", value="(Docente) Elimina un archivo por nombre.", inline=False)
     embed.add_field(name="!enviar_archivo <criterio>", value="Envía archivos por privado según nombre, tipo o 'todo'.", inline=False)
     embed.add_field(name="!agregar_entrega <nombre> <fecha> <hora> <#canal>", value="(Docente) Agrega una entrega y programa recordatorios automáticos. Fecha: YYYY-MM-DD, Hora: HH:MM.", inline=False)
@@ -328,5 +330,60 @@ async def help_command(ctx):
 async def on_ready():
     print(f"El bot {bot.user} esta listo")
     recordatorio_entregas.start()
+
+@bot.command(name="descargar")
+async def descargar(ctx, categoria: str = None):
+    categorias = {"teoria": "Teo", "tp": "TP", "bibliografia": "BIB"}
+    if categoria is None or categoria.lower() not in categorias:
+        await ctx.send("Indica la categoría: `teoria`, `tp` o `bibliografia` (ejemplo: !descargar teoria)")
+        return
+    tipo = categorias[categoria.lower()]
+    
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute("SELECT nombre_archivo, ruta_archivo FROM archivos WHERE tipo = ? ORDER BY fecha_subida DESC", (tipo,))
+    archivos = cursor.fetchall()
+    conn.close()
+
+    if not archivos:
+        await ctx.send("No hay archivos en esa categoría.")
+        return
+
+    class ArchivoView(View):
+        def __init__(self, archivos):
+            super().__init__(timeout=60)
+            for nombre, ruta in archivos[:10]:  # Máximo 10 botones por mensaje
+                self.add_item(Button(label=nombre, style=discord.ButtonStyle.primary, custom_id=nombre))
+            self.rutas = {nombre: ruta for nombre, ruta in archivos}
+
+        async def interaction_check(self, interaction):
+            return interaction.user == ctx.author
+
+        @discord.ui.button(label="Cancelar", style=discord.ButtonStyle.danger, row=1)
+        async def cancelar(self, interaction: discord.Interaction, button: Button):
+            await interaction.response.edit_message(content="Operación cancelada.", view=None)
+            self.stop()
+
+        async def on_timeout(self):
+            for item in self.children:
+                item.disabled = True
+
+    view = ArchivoView(archivos)
+
+    async def button_callback(interaction: discord.Interaction):
+        nombre = interaction.data['custom_id']
+        ruta = view.rutas.get(nombre)
+        if ruta and os.path.exists(ruta):
+            await interaction.response.send_message(f"Enviando `{nombre}`...", ephemeral=True)
+            await ctx.send(file=discord.File(ruta))
+        else:
+            await interaction.response.send_message(f"No se encontró el archivo `{nombre}`.", ephemeral=True)
+        view.stop()
+
+    for item in view.children:
+        if isinstance(item, Button) and item.label != "Cancelar":
+            item.callback = button_callback
+
+    await ctx.send(f"Selecciona un archivo de {categoria.title()}:", view=view)
 
 bot.run(dst.TOKEN)
