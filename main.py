@@ -320,6 +320,7 @@ async def help_command(ctx):
     embed.add_field(name="!subir", value="(Docente) Sube un archivo de teoría, TP o bibliografía.", inline=False)
     embed.add_field(name="!ver_archivos [filtro]", value="Muestra los archivos subidos. Puedes filtrar por 'teoria', 'tp', 'bibliografia'.", inline=False)
     embed.add_field(name="!descargar <categoria>", value="Muestra los archivos de la categoría elegida y permite descargarlos con botones interactivos.", inline=False)
+    embed.add_field(name="!buscar [filtros]", value="Busca materiales por tipo, fecha o autor. Ejemplo: !buscar tipo=teoria fecha=2025-06-01 autor=Juan", inline=False)
     embed.add_field(name="!eliminar_archivo <nombre>", value="(Docente) Elimina un archivo por nombre.", inline=False)
     embed.add_field(name="!enviar_archivo <criterio>", value="Envía archivos por privado según nombre, tipo o 'todo'.", inline=False)
     embed.add_field(name="!agregar_entrega <nombre> <fecha> <hora> <#canal>", value="(Docente) Agrega una entrega y programa recordatorios automáticos. Fecha: YYYY-MM-DD, Hora: HH:MM.", inline=False)
@@ -385,5 +386,123 @@ async def descargar(ctx, categoria: str = None):
             item.callback = button_callback
 
     await ctx.send(f"Selecciona un archivo de {categoria.title()}:", view=view)
+
+@bot.command(name="buscar")
+async def buscar(ctx):
+    """
+    Búsqueda interactiva de materiales por tipo, fecha y autor.
+    """
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    # Obtener valores únicos para menús
+    cursor.execute("SELECT DISTINCT tipo FROM archivos")
+    tipos = [row[0] for row in cursor.fetchall()]
+    cursor.execute("SELECT DISTINCT date(fecha_subida) FROM archivos")
+    fechas = [row[0] for row in cursor.fetchall() if row[0]]
+    cursor.execute("SELECT DISTINCT autor_nombre FROM archivos")
+    autores = [row[0] for row in cursor.fetchall() if row[0]]
+    conn.close()
+
+    class FiltrosView(View):
+        def __init__(self):
+            super().__init__(timeout=120)
+            self.tipo = None
+            self.fecha = None
+            self.autor = None
+            self.resultados = None
+            # Menú de tipo
+            if tipos:
+                self.add_item(discord.ui.Select(placeholder="Filtrar por tipo (opcional)", options=[discord.SelectOption(label=t, value=t) for t in tipos], custom_id="tipo", min_values=0, max_values=1))
+            # Menú de fecha
+            if fechas:
+                self.add_item(discord.ui.Select(placeholder="Filtrar por fecha (opcional)", options=[discord.SelectOption(label=f, value=f) for f in fechas], custom_id="fecha", min_values=0, max_values=1))
+            # Menú de autor
+            if autores:
+                self.add_item(discord.ui.Select(placeholder="Filtrar por autor (opcional)", options=[discord.SelectOption(label=a, value=a) for a in autores], custom_id="autor", min_values=0, max_values=1))
+            self.add_item(Button(label="Buscar", style=discord.ButtonStyle.success, custom_id="buscar"))
+            self.add_item(Button(label="Cancelar", style=discord.ButtonStyle.danger, custom_id="cancelar"))
+        async def interaction_check(self, interaction):
+            return interaction.user == ctx.author
+        async def on_timeout(self):
+            for item in self.children:
+                item.disabled = True
+    view = FiltrosView()
+    async def select_callback(interaction: discord.Interaction):
+        cid = interaction.data['custom_id']
+        value = interaction.data['values'][0] if interaction.data.get('values') else None
+        if cid == "tipo":
+            view.tipo = value
+        elif cid == "fecha":
+            view.fecha = value
+        elif cid == "autor":
+            view.autor = value
+        await interaction.response.defer()
+    async def buscar_callback(interaction: discord.Interaction):
+        # Ejecutar búsqueda
+        query = "SELECT nombre_archivo, tipo, fecha_subida, autor_nombre, ruta_archivo FROM archivos WHERE 1=1"
+        params = []
+        if view.tipo:
+            query += " AND tipo = ?"
+            params.append(view.tipo)
+        if view.fecha:
+            query += " AND date(fecha_subida) = ?"
+            params.append(view.fecha)
+        if view.autor:
+            query += " AND autor_nombre = ?"
+            params.append(view.autor)
+        query += " ORDER BY fecha_subida DESC LIMIT 15"
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
+        cursor.execute(query, params)
+        resultados = cursor.fetchall()
+        conn.close()
+        if not resultados:
+            await interaction.response.edit_message(content="No se encontraron archivos con esos filtros.", view=None)
+            return
+        class ResultadosView(View):
+            def __init__(self, archivos):
+                super().__init__(timeout=60)
+                for nombre, _, _, _, _ in archivos[:10]:
+                    self.add_item(Button(label=nombre, style=discord.ButtonStyle.primary, custom_id=nombre))
+                self.rutas = {nombre: ruta for nombre, _, _, _, ruta in archivos}
+            async def interaction_check(self, interaction):
+                return interaction.user == ctx.author
+            @discord.ui.button(label="Cancelar", style=discord.ButtonStyle.danger, row=1)
+            async def cancelar(self, interaction: discord.Interaction, button: Button):
+                await interaction.response.edit_message(content="Operación cancelada.", view=None)
+                self.stop()
+            async def on_timeout(self):
+                for item in self.children:
+                    item.disabled = True
+        resultados_view = ResultadosView(resultados)
+        async def button_callback(interaction: discord.Interaction):
+            nombre = interaction.data['custom_id']
+            ruta = resultados_view.rutas.get(nombre)
+            if ruta and os.path.exists(ruta):
+                await interaction.response.send_message(f"Enviando `{nombre}`...", ephemeral=True)
+                await ctx.send(file=discord.File(ruta))
+            else:
+                await interaction.response.send_message(f"No se encontró el archivo `{nombre}`.", ephemeral=True)
+            resultados_view.stop()
+        for item in resultados_view.children:
+            if isinstance(item, Button) and item.label != "Cancelar":
+                item.callback = button_callback
+        embed = discord.Embed(title="Resultados de búsqueda", color=discord.Color.purple())
+        for nombre, tipo, fecha, autor, _ in resultados:
+            embed.add_field(name=nombre, value=f"Tipo: {tipo}\nFecha: {fecha}\nAutor: {autor}", inline=False)
+        await interaction.response.edit_message(content=None, embed=embed, view=resultados_view)
+    async def cancelar_callback(interaction: discord.Interaction):
+        await interaction.response.edit_message(content="Operación cancelada.", view=None)
+        view.stop()
+    # Asignar callbacks
+    for item in view.children:
+        if isinstance(item, discord.ui.Select):
+            item.callback = select_callback
+        elif isinstance(item, Button):
+            if item.custom_id == "buscar":
+                item.callback = buscar_callback
+            elif item.custom_id == "cancelar":
+                item.callback = cancelar_callback
+    await ctx.send("Selecciona los filtros para buscar materiales:", view=view)
 
 bot.run(dst.TOKEN)
