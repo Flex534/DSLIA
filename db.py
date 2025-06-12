@@ -25,5 +25,17 @@ def inicializar_db():
                 autor_nombre TEXT NOT NULL
             )
         ''')
+        # Crear tabla de entregas
+        cursor.execute('''
+            CREATE TABLE entregas (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                nombre TEXT NOT NULL,
+                fecha TEXT NOT NULL,
+                hora TEXT NOT NULL,
+                canal_id INTEGER NOT NULL,
+                recordado_24h INTEGER DEFAULT 0,
+                recordado_1h INTEGER DEFAULT 0
+            )
+        ''')
         conn.commit()
         conn.close()

@@ -1,6 +1,6 @@
 from ntpath import join
 import discord
-from discord.ext import commands
+from discord.ext import commands, tasks
 import requests
 import dst  #necesario para activar el token del bot
 import os 
@@ -11,9 +11,9 @@ import sqlite3
 intents= discord.Intents.default()
 intents.message_content= True
 
-bot= commands.Bot(command_prefix ="!", intents=intents)
+bot= commands.Bot(command_prefix ="!", intents=intents, help_command=None)
 
-from DSLIA.db import inicializar_db,DB_PATH
+from db import inicializar_db, DB_PATH
 inicializar_db()
 
 @bot.command(name="prueba")
@@ -211,9 +211,122 @@ async def enviar_archivo(ctx, *, criterio: str):
     except discord.Forbidden:
         await ctx.send("❌ No puedo enviarte mensajes privados. Verificá que tenés los DMs activados.")
 
+# Comando para agregar una entrega
+@bot.command(name="agregar_entrega")
+@commands.has_role("Docente")
+async def agregar_entrega(ctx):
+    """
+    Agrega una entrega de forma interactiva.
+    """
+    def check(m):
+        return m.author == ctx.author and m.channel == ctx.channel
+
+    # Paso 1: Nombre
+    await ctx.send("Por favor, indica el nombre de la entrega:")
+    try:
+        nombre_msg = await bot.wait_for('message', check=check, timeout=60)
+        nombre = nombre_msg.content.strip()
+    except:
+        return await ctx.send("❌ Tiempo agotado o entrada inválida. Abortando.")
+
+    # Paso 2: Fecha
+    await ctx.send("Indica la fecha de entrega (YYYY-MM-DD):")
+    try:
+        fecha_msg = await bot.wait_for('message', check=check, timeout=60)
+        fecha = fecha_msg.content.strip()
+        datetime.datetime.strptime(fecha, "%Y-%m-%d")
+    except:
+        return await ctx.send("❌ Formato de fecha incorrecto o tiempo agotado. Abortando.")
+
+    # Paso 3: Hora
+    await ctx.send("Indica la hora de entrega (HH:MM, 24hs):")
+    try:
+        hora_msg = await bot.wait_for('message', check=check, timeout=60)
+        hora = hora_msg.content.strip()
+        datetime.datetime.strptime(hora, "%H:%M")
+    except:
+        return await ctx.send("❌ Formato de hora incorrecto o tiempo agotado. Abortando.")
+
+    # Paso 4: Canal
+    await ctx.send("Menciona el canal donde enviar el recordatorio (ejemplo: #general):")
+    def check_channel(m):
+        return m.author == ctx.author and m.channel == ctx.channel and m.raw_channel_mentions
+    try:
+        canal_msg = await bot.wait_for('message', check=check_channel, timeout=60)
+        canal_id = canal_msg.raw_channel_mentions[0]
+    except:
+        return await ctx.send("❌ No se mencionó un canal válido o tiempo agotado. Abortando.")
+
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute('''INSERT INTO entregas (nombre, fecha, hora, canal_id) VALUES (?, ?, ?, ?)''',
+                   (nombre, fecha, hora, canal_id))
+    conn.commit()
+    conn.close()
+    await ctx.send(f"✅ Entrega '{nombre}' agregada para el {fecha} a las {hora}.")
+
+# Comando para listar entregas
+@bot.command(name="listar_entregas")
+async def listar_entregas(ctx):
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute('''SELECT nombre, fecha, hora FROM entregas ORDER BY fecha, hora''')
+    entregas = cursor.fetchall()
+    conn.close()
+    if not entregas:
+        await ctx.send("📭 No hay entregas registradas.")
+        return
+    mensaje = "\n".join([f"📌 {n} - {f} {h}" for n, f, h in entregas])
+    await ctx.send(f"**Entregas próximas:**\n{mensaje}")
+
+# Tarea background para enviar recordatorios
+@tasks.loop(minutes=30)
+async def recordatorio_entregas():
+    ahora = datetime.datetime.now()
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute('''SELECT id, nombre, fecha, hora, canal_id, recordado_24h, recordado_1h FROM entregas''')
+    entregas = cursor.fetchall()
+    for id_, nombre, fecha, hora, canal_id, rec24, rec1 in entregas:
+        dt_entrega = datetime.datetime.strptime(f"{fecha} {hora}", "%Y-%m-%d %H:%M")
+        delta = dt_entrega - ahora
+        canal = bot.get_channel(canal_id)
+        alumnos_rol = None
+        if canal and canal.guild:
+            alumnos_rol = discord.utils.get(canal.guild.roles, name="Alumno")
+        mention = alumnos_rol.mention if alumnos_rol else "@everyone"
+        # Recordatorio 24h antes
+        if 0 < delta.total_seconds() <= 86400 and not rec24:
+            if canal:
+                await canal.send(f"{mention} ⏰ Recordatorio: La entrega '{nombre}' es en 24 horas ({fecha} {hora})!")
+            cursor.execute('UPDATE entregas SET recordado_24h = 1 WHERE id = ?', (id_,))
+        # Recordatorio 1h antes
+        if 0 < delta.total_seconds() <= 3600 and not rec1:
+            if canal:
+                await canal.send(f"{mention} ⏰ Recordatorio: La entrega '{nombre}' es en 1 hora ({fecha} {hora})!")
+            cursor.execute('UPDATE entregas SET recordado_1h = 1 WHERE id = ?', (id_,))
+        # Si ya pasó la entrega, se puede eliminar (opcional)
+        if delta.total_seconds() < -3600:
+            cursor.execute('DELETE FROM entregas WHERE id = ?', (id_,))
+    conn.commit()
+    conn.close()
+
+@bot.command(name="help")
+async def help_command(ctx):
+    embed = discord.Embed(title="Ayuda de comandos del bot", color=discord.Color.green())
+    embed.add_field(name="!prueba <texto>", value="Repite el texto que escribas.", inline=False)
+    embed.add_field(name="!saludo", value="El bot te saluda.", inline=False)
+    embed.add_field(name="!subir", value="(Docente) Sube un archivo de teoría, TP o bibliografía.", inline=False)
+    embed.add_field(name="!ver_archivos [filtro]", value="Muestra los archivos subidos. Puedes filtrar por 'teoria', 'tp', 'bibliografia'.", inline=False)
+    embed.add_field(name="!eliminar_archivo <nombre>", value="(Docente) Elimina un archivo por nombre.", inline=False)
+    embed.add_field(name="!enviar_archivo <criterio>", value="Envía archivos por privado según nombre, tipo o 'todo'.", inline=False)
+    embed.add_field(name="!agregar_entrega <nombre> <fecha> <hora> <#canal>", value="(Docente) Agrega una entrega y programa recordatorios automáticos. Fecha: YYYY-MM-DD, Hora: HH:MM.", inline=False)
+    embed.add_field(name="!listar_entregas", value="Muestra la lista de entregas próximas.", inline=False)
+    await ctx.send(embed=embed)
 
 @bot.event
 async def on_ready():
     print(f"El bot {bot.user} esta listo")
+    recordatorio_entregas.start()
 
 bot.run(dst.TOKEN)
