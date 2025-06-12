@@ -13,7 +13,7 @@ intents.message_content= True
 
 bot= commands.Bot(command_prefix ="!", intents=intents)
 
-from db import inicializar_db,DB_PATH
+from DSLIA.db import inicializar_db,DB_PATH
 inicializar_db()
 
 @bot.command(name="prueba")
