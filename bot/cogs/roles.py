@@ -10,12 +10,17 @@ class Roles(commands.Cog):
         role_name = "Alumno"
         role = discord.utils.get(member.guild.roles, name=role_name)
         if role:
-            await member.add_roles(role)
-            print(f"Se asignó el rol '{role_name}' a {member.name}")
-            # Enviar mensaje de bienvenida al canal general
-            canal_bienvenida = discord.utils.get(member.guild.text_channels, name="general")
-            if canal_bienvenida:
-                await canal_bienvenida.send(f"¡Bienvenido/a {member.mention} al servidor! Ya tienes el rol de Alumno.")
+            try:
+                await member.add_roles(role)
+                print(f"Se asignó el rol '{role_name}' a {member.name}")
+                # Enviar mensaje de bienvenida al canal general
+                canal_bienvenida = discord.utils.get(member.guild.text_channels, name="general")
+                if canal_bienvenida:
+                    await canal_bienvenida.send(f"¡Bienvenido/a {member.mention} al servidor! Ya tienes el rol de Alumno.")
+            except discord.Forbidden:
+                print(f"No tengo permisos para asignar el rol '{role_name}' a {member.name}")
+            except Exception as e:
+                print(f"Error al asignar el rol '{role_name}' a {member.name}: {e}")
         else:
             print(f"Rol '{role_name}' no encontrado en el servidor.")
 
