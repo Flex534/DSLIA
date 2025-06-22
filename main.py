@@ -10,6 +10,7 @@ async def main():
         'bot.cogs.archivos',
         'bot.cogs.entregas',
         'bot.cogs.otros',
+        'bot.cogs.moderacion',
     ]:
         await bot.load_extension(cog)
     await bot.start(dst.TOKEN)

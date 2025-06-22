@@ -28,6 +28,10 @@ class Otros(commands.Cog):
         embed.add_field(name="!enviar_archivo <criterio>", value="Envía archivos por privado según nombre, tipo o 'todo'.", inline=False)
         embed.add_field(name="!agregar_entrega <nombre> <fecha> <hora> <#canal>", value="(Docente) Agrega una entrega y programa recordatorios automáticos. Fecha: YYYY-MM-DD, Hora: HH:MM.", inline=False)
         embed.add_field(name="!listar_entregas", value="Muestra la lista de entregas próximas.", inline=False)
+        # Comandos de moderación
+        embed.add_field(name="!ban @usuario <motivo>", value="(Docente) Banea a un usuario e informa por MD. Permite agregar comentario adicional.", inline=False)
+        embed.add_field(name="!unban <user_id>", value="(Docente) Desbanea a un usuario por ID.", inline=False)
+        embed.add_field(name="!baneados", value="(Docente) Muestra la lista de usuarios baneados, motivos y comentarios.", inline=False)
         await ctx.send(embed=embed)
 
     @commands.Cog.listener()
