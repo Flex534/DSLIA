@@ -1,0 +1,12 @@
+# Ignorar archivos de configuración sensibles
+DST.py
+dst.py
+
+# Ignorar base de datos y archivos temporales
+archivos.db
+__pycache__/
+*.pyc
+
+# Ignorar carpetas de sistema
+.DS_Store
+Thumbs.db
